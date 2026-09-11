@@ -1,15 +1,16 @@
+import json
 import os
 import time
 from datetime import datetime, timezone
 
 import pandas as pd
 
-from data.questions import QUESTIONS
 from src.hotdata_client import connect as hotdata_connect
 from src.hotdata_client import create_task_db, destroy_db, run_sql
 from src.llm import ask_llm
 from src.rocketride_client import connect as rocketride_connect
 from src.rocketride_client import start_pipeline, stop_pipeline
+from src.skills import match_skill
 from src.telemetry import get_telemetry_db, log_events
 
 
@@ -78,6 +79,27 @@ def _distinct_text_values(df):
     return text
 
 
+def _known_text_values(df):
+    known = {}
+    text_columns = ["region", "category", "product", "channel"]
+    for col_name in text_columns:
+        unique_values = df[col_name].dropna().unique()
+        for value in unique_values:
+            known[str(value)] = True
+    return known
+
+
+def _load_skills():
+    skills_path = os.path.join(_project_root(), "skills.json")
+    if not os.path.exists(skills_path):
+        return {}
+    with open(skills_path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    if isinstance(data, dict):
+        return data
+    return {}
+
+
 def _build_sql_prompt(df, question_text):
     columns = _column_description(df)
     distinct_values = _distinct_text_values(df)
@@ -136,7 +158,7 @@ def _strip_sql_fences(text):
     return cleaned
 
 
-async def run_day_shift(session_id):
+async def run_day_shift(session_id, questions, use_skills, day_number):
     from dotenv import load_dotenv
 
     env_path = os.path.join(_project_root(), ".env")
@@ -156,6 +178,12 @@ async def run_day_shift(session_id):
     task_db = create_task_db(db_name, df)
     print("Created task database id=", task_db)
 
+    skills = {}
+    known_values = _known_text_values(df)
+    if use_skills:
+        skills = _load_skills()
+        print("Loaded", len(skills), "skills from skills.json")
+
     use_rr = _use_rocketride()
     rr_client = None
     rr_token = None
@@ -168,64 +196,107 @@ async def run_day_shift(session_id):
     events = []
     success_count = 0
     total_tokens = 0
+    reflex_count = 0
+    llm_count = 0
+    reflex_seconds = 0.0
+    llm_seconds = 0.0
     run_start = time.time()
 
     question_index = 0
-    for item in QUESTIONS:
+    for item in questions:
         question_index = question_index + 1
         question_type = item["question_type"]
         question_text = item["question"]
 
         print("")
-        print("Question", question_index, "/", len(QUESTIONS))
+        print("Question", question_index, "/", len(questions))
         print("Type:", question_type)
         print("Question:", question_text)
 
         question_start = time.time()
         llm_tokens = 0
-        tokens_estimated = True
+        tokens_estimated = False
         hotdata_queries = 0
         success = False
         error_text = ""
         sql_text = ""
         result_df = None
         rows_returned = 0
+        used_skill = False
+        event_type = "answer"
 
-        prompt = _build_sql_prompt(df, question_text)
-        llm_result = await ask_llm(rr_client, rr_token, prompt)
-        llm_tokens = llm_tokens + llm_result["tokens"]
-        tokens_estimated = llm_result["tokens_estimated"]
+        skill_hit = None
+        if use_skills:
+            skill_hit = match_skill(question_text, skills, known_values)
 
-        sql_text = _strip_sql_fences(llm_result["text"])
-        print("SQL:", sql_text)
-
-        try:
-            result_df = run_sql(hot_con, task_db, sql_text)
-            hotdata_queries = hotdata_queries + 1
-            success = True
-        except Exception as first_error:
-            hotdata_queries = hotdata_queries + 1
-            error_text = str(first_error)
-            print("SQL error:", error_text)
-
-            retry_prompt = _build_fix_prompt(sql_text, error_text)
-            retry_result = await ask_llm(rr_client, rr_token, retry_prompt)
-            llm_tokens = llm_tokens + retry_result["tokens"]
-            tokens_estimated = retry_result["tokens_estimated"]
-
-            sql_text = _strip_sql_fences(retry_result["text"])
-            print("Retry SQL:", sql_text)
+        if skill_hit is not None:
+            used_skill = True
+            event_type = "reflex"
+            tokens_estimated = False
+            llm_tokens = 0
+            question_type = skill_hit["question_type"]
+            sql_text = skill_hit["sql"]
+            print("Reflex skill match type=", question_type)
+            print("SQL:", sql_text)
 
             try:
                 result_df = run_sql(hot_con, task_db, sql_text)
                 hotdata_queries = hotdata_queries + 1
                 success = True
-                error_text = ""
-            except Exception as second_error:
+            except Exception as skill_error:
                 hotdata_queries = hotdata_queries + 1
-                error_text = str(second_error)
-                print("Retry SQL error:", error_text)
+                error_text = str(skill_error)
+                print("Reflex SQL error:", error_text)
                 success = False
+        else:
+            used_skill = False
+            event_type = "answer"
+            prompt = _build_sql_prompt(df, question_text)
+            llm_result = await ask_llm(rr_client, rr_token, prompt)
+            llm_tokens = llm_tokens + llm_result["tokens"]
+            tokens_estimated = llm_result["tokens_estimated"]
+
+            sql_text = _strip_sql_fences(llm_result["text"])
+            print("SQL:", sql_text)
+
+            try:
+                result_df = run_sql(hot_con, task_db, sql_text)
+                hotdata_queries = hotdata_queries + 1
+                success = True
+            except Exception as first_error:
+                hotdata_queries = hotdata_queries + 1
+                error_text = str(first_error)
+                print("SQL error:", error_text)
+
+                retry_prompt = _build_fix_prompt(sql_text, error_text)
+                retry_result = await ask_llm(rr_client, rr_token, retry_prompt)
+                llm_tokens = llm_tokens + retry_result["tokens"]
+                tokens_estimated = retry_result["tokens_estimated"]
+
+                sql_text = _strip_sql_fences(retry_result["text"])
+                print("Retry SQL:", sql_text)
+
+                try:
+                    result_df = run_sql(hot_con, task_db, sql_text)
+                    hotdata_queries = hotdata_queries + 1
+                    success = True
+                    error_text = ""
+                except Exception as second_error:
+                    hotdata_queries = hotdata_queries + 1
+                    error_text = str(second_error)
+                    print("Retry SQL error:", error_text)
+                    success = False
+
+        question_elapsed = time.time() - question_start
+        latency_ms = int(question_elapsed * 1000)
+        total_tokens = total_tokens + llm_tokens
+
+        if used_skill:
+            reflex_count = reflex_count + 1
+            reflex_seconds = reflex_seconds + question_elapsed
+        else:
+            llm_count = llm_count + 1
+            llm_seconds = llm_seconds + question_elapsed
 
         if success:
             success_count = success_count + 1
@@ -236,19 +307,16 @@ async def run_day_shift(session_id):
             rows_returned = 0
             print("No result rows")
 
-        latency_ms = int((time.time() - question_start) * 1000)
-        total_tokens = total_tokens + llm_tokens
-
         created_at = datetime.now(timezone.utc).isoformat()
         event = {
             "event_id": session_id + "-" + str(question_index),
             "session_id": session_id,
             "run_type": "day",
             "agent_id": "worker",
-            "event_type": "answer",
+            "event_type": event_type,
             "question_type": question_type,
             "question": question_text,
-            "used_skill": False,
+            "used_skill": used_skill,
             "llm_tokens": llm_tokens,
             "tokens_estimated": tokens_estimated,
             "latency_ms": latency_ms,
@@ -257,6 +325,7 @@ async def run_day_shift(session_id):
             "error": error_text,
             "sql": sql_text,
             "rows_returned": rows_returned,
+            "day_number": day_number,
             "created_at": created_at,
         }
         events.append(event)
@@ -274,9 +343,22 @@ async def run_day_shift(session_id):
     print("Logged", len(events), "events to telemetry")
 
     total_seconds = time.time() - run_start
+
+    reflex_avg = 0.0
+    if reflex_count > 0:
+        reflex_avg = reflex_seconds / reflex_count
+
+    llm_avg = 0.0
+    if llm_count > 0:
+        llm_avg = llm_seconds / llm_count
+
     print("")
     print("Summary")
     print("questions answered=", len(events))
     print("successes=", success_count)
+    print("reflex answers=", reflex_count)
+    print("LLM answers=", llm_count)
     print("total tokens=", total_tokens)
     print("total seconds=", round(total_seconds, 2))
+    print("avg seconds per reflex question=", round(reflex_avg, 2))
+    print("avg seconds per LLM question=", round(llm_avg, 2))

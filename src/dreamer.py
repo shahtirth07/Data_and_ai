@@ -201,6 +201,8 @@ def _build_skill_prompt(question_type, examples, df):
         "- Only make a named group for parts that are DIFFERENT between the example "
         'questions. Parts that are the same in every example, like "top 3", "2025", '
         '"Jul-Sep", must stay as literal text in the regex and in the SQL.\n'
+        "- Every named group in the regex must list ALL distinct values for that "
+        "column, not only the values seen in the examples.\n"
         '- Use table "default"."main"."orders".\n'
         "- Use INTEGER not INT64.\n"
         "- Use exact capitalization for text values.\n"
