@@ -10,6 +10,7 @@ questions_name = "day1"
 skills_flag = "off"
 day_number = 1
 run_label = ""
+playbook_flag = "on"
 
 args = sys.argv[1:]
 i = 0
@@ -34,10 +35,16 @@ while i < len(args):
                     i = i + 1
                     if i < len(args):
                         run_label = args[i]
+                else:
+                    if arg == "--playbook":
+                        i = i + 1
+                        if i < len(args):
+                            playbook_flag = args[i]
     i = i + 1
 
 questions_name = questions_name.strip().lower()
 skills_flag = skills_flag.strip().lower()
+playbook_flag = playbook_flag.strip().lower()
 
 if questions_name == "day2":
     questions = QUESTIONS_DAY2
@@ -54,6 +61,14 @@ else:
     use_skills = False
     skills_flag = "off"
 
+use_playbook = True
+if playbook_flag == "off":
+    use_playbook = False
+    playbook_flag = "off"
+else:
+    use_playbook = True
+    playbook_flag = "on"
+
 now = datetime.now()
 stamp = now.strftime("%H%M%S")
 session_id = "day-" + stamp
@@ -64,7 +79,10 @@ print("questions=", questions_name)
 print("skills=", skills_flag)
 print("day_number=", day_number)
 print("label=", run_label)
+print("playbook=", playbook_flag)
 
 asyncio.run(
-    run_day_shift(session_id, questions, use_skills, day_number, run_label)
+    run_day_shift(
+        session_id, questions, use_skills, day_number, run_label, use_playbook
+    )
 )

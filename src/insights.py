@@ -237,4 +237,26 @@ INSIGHTS = [
         "chart_x": "question_type",
         "chart_y": "tokens_before_recipe",
     },
+    {
+        "title": "Playbook effect",
+        "meaning": "For LLM answer events only, compare playbook_used true vs false on retry rate, failure rate, and average latency_ms.",
+        "sql": (
+            'SELECT '
+            "playbook_used, "
+            "COUNT(*) AS answer_count, "
+            "AVG(CASE WHEN hotdata_queries > 1 THEN 1.0 ELSE 0.0 END) AS retry_rate, "
+            "AVG(CASE WHEN success = false THEN 1.0 ELSE 0.0 END) AS failure_rate, "
+            "AVG(latency_ms) AS avg_latency_ms "
+            'FROM "default"."main"."events" '
+            "WHERE event_type = 'answer' "
+            "AND session_id <> 'test' "
+            "AND session_id <> 'setup' "
+            "AND playbook_used IS NOT NULL "
+            "GROUP BY playbook_used "
+            "ORDER BY playbook_used"
+        ),
+        "chart": "bar",
+        "chart_x": "playbook_used",
+        "chart_y": "avg_latency_ms",
+    },
 ]

@@ -1,0 +1,10 @@
+[
+  "Only use quoted string literals for categories and regions (e.g., category = 'Electronics', region = 'West') and never leave values like 3 or 2025 unquoted where a text value is expected.",
+  "For top-products questions, keep the output columns exactly as product and SUM(amount) and use LIMIT 3 (with 3 as a numeric LIMIT, not a captured text value).",
+  "For monthly trend by year, filter with a date range (CAST(order_date AS DATE) >= DATE '2025-01-01' AND CAST(order_date AS DATE) < DATE '2026-01-01') instead of trying to capture the year as a free text token.",
+  "When grouping by month, prefer DATE_TRUNC('month', CAST(order_date AS DATE)) and then GROUP BY 1 ORDER BY 1 to avoid string parsing edge cases.",
+  "For quarter comparisons, compute Q3 and Q4 using month numbers (7-9 and 10-12) via EXTRACT(MONTH FROM CAST(order_date AS DATE)) or CAST(SUBSTR(order_date,6,2) AS INT), and do not output labels like 'Jul-Sep' or 'Oct-Dec'.",
+  "Avoid embedding regex-style inline flags or patterns in SQL strings, since they can trigger errors like 'global flags not at the start of the expression'.",
+  "For returns, treat returns as quantity = 0 and count rows per product with ORDER BY zero_quantity_orders DESC, product ASC for deterministic results.",
+  "Use the fully qualified table name \"default\".\"main\".\"orders\" exactly as shown to prevent schema resolution retries."
+]
