@@ -68,6 +68,7 @@ def get_telemetry_db(con):
         "question": "",
         "used_skill": False,
         "llm_tokens": 0,
+        "tokens_estimated": True,
         "latency_ms": 0,
         "hotdata_queries": 0,
         "success": True,
