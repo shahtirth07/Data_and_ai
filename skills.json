@@ -1,0 +1,34 @@
+{
+  "channel_split": {
+    "question_regex": "^What are the online vs store sales amounts for the (?P<region>East|Midwest|Northeast|South|West) region\\?$",
+    "sql_template": "SELECT\n  channel,\n  SUM(amount) AS total_sales_amount\nFROM \"default\".\"main\".\"orders\"\nWHERE region = '{region}'\nGROUP BY channel\nORDER BY channel;"
+  },
+  "quarter_growth": {
+    "question_regex": "^How do Q3 \\(Jul\\-Sep\\) vs Q4 \\(Oct\\-Dec\\) sales compare for the (?P<category>Apparel|Electronics|Grocery|Home) category\\?$",
+    "sql_template": "SELECT\n  SUM(CASE WHEN CAST(SUBSTR(order_date, 6, 2) AS INTEGER) BETWEEN 7 AND 9 THEN amount ELSE 0 END) AS q3_sales,\n  SUM(CASE WHEN CAST(SUBSTR(order_date, 6, 2) AS INTEGER) BETWEEN 10 AND 12 THEN amount ELSE 0 END) AS q4_sales,\n  SUM(CASE WHEN CAST(SUBSTR(order_date, 6, 2) AS INTEGER) BETWEEN 10 AND 12 THEN amount ELSE 0 END)\n  - SUM(CASE WHEN CAST(SUBSTR(order_date, 6, 2) AS INTEGER) BETWEEN 7 AND 9 THEN amount ELSE 0 END) AS q4_minus_q3,\n  CASE\n    WHEN SUM(CASE WHEN CAST(SUBSTR(order_date, 6, 2) AS INTEGER) BETWEEN 7 AND 9 THEN amount ELSE 0 END) = 0 THEN NULL\n    ELSE\n      SUM(CASE WHEN CAST(SUBSTR(order_date, 6, 2) AS INTEGER) BETWEEN 10 AND 12 THEN amount ELSE 0 END)\n      / SUM(CASE WHEN CAST(SUBSTR(order_date, 6, 2) AS INTEGER) BETWEEN 7 AND 9 THEN amount ELSE 0 END)\n  END AS q4_to_q3_ratio\nFROM \"default\".\"main\".\"orders\"\nWHERE category = '{category}'\n  AND CAST(SUBSTR(order_date, 6, 2) AS INTEGER) BETWEEN 7 AND 12;"
+  },
+  "region_total": {
+    "question_regex": "^What is the total sales amount for the (?P<region>East|Midwest|Northeast|South|West) region\\?$",
+    "sql_template": "SELECT SUM(amount) AS total_sales_amount\nFROM \"default\".\"main\".\"orders\"\nWHERE region = '{region}';"
+  },
+  "returns": {
+    "question_regex": "^Which products in the (?P<category>Apparel|Electronics|Grocery|Home) category have the most zero-quantity orders\\?$",
+    "sql_template": "SELECT\n  product,\n  COUNT(*) AS zero_quantity_orders\nFROM \"default\".\"main\".\"orders\"\nWHERE category = '{category}'\n  AND quantity = 0\nGROUP BY product\nORDER BY zero_quantity_orders DESC, product ASC;"
+  },
+  "monthly_trend": {
+    "question_regex": "^What are the monthly sales totals for the (?P<region>East|Midwest|Northeast|South|West) region in 2025\\?$",
+    "sql_template": "SELECT\n  DATE_TRUNC('month', CAST(order_date AS DATE)) AS month,\n  SUM(amount) AS monthly_sales_total\nFROM \"default\".\"main\".\"orders\"\nWHERE region = '{region}'\n  AND CAST(order_date AS DATE) >= DATE '2025-01-01'\n  AND CAST(order_date AS DATE) < DATE '2026-01-01'\nGROUP BY 1\nORDER BY 1;"
+  },
+  "top_products": {
+    "question_regex": "^What are the top 3 products by sales amount in the (?P<category>Apparel|Electronics|Grocery|Home) category\\?$",
+    "sql_template": "SELECT\n  product,\n  SUM(amount) AS total_sales_amount\nFROM \"default\".\"main\".\"orders\"\nWHERE category = '{category}'\nGROUP BY product\nORDER BY total_sales_amount DESC\nLIMIT 3;"
+  },
+  "avg_order_value": {
+    "question_regex": "^What is the average order amount for the (?P<region>East|Midwest|Northeast|South|West) region\\?$",
+    "sql_template": "SELECT AVG(amount) AS average_order_amount\nFROM \"default\".\"main\".\"orders\"\nWHERE region = '{region}';"
+  },
+  "channel_count": {
+    "question_regex": "^How many orders are there per channel for the (?P<category>Apparel|Electronics|Grocery|Home) category\\?$",
+    "sql_template": "SELECT\n  channel,\n  COUNT(*) AS order_count\nFROM \"default\".\"main\".\"orders\"\nWHERE category = '{category}'\nGROUP BY channel\nORDER BY channel;"
+  }
+}
