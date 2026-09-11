@@ -20,7 +20,15 @@
     "sql_template": "SELECT\n  DATE_TRUNC('month', CAST(order_date AS DATE)) AS month,\n  SUM(amount) AS monthly_sales_total\nFROM \"default\".\"main\".\"orders\"\nWHERE region = '{region}'\n  AND CAST(order_date AS DATE) >= DATE '2025-01-01'\n  AND CAST(order_date AS DATE) < DATE '2026-01-01'\nGROUP BY 1\nORDER BY 1;"
   },
   "top_products": {
-    "question_regex": "^What are the top 3 products by sales amount in the (?P<category>Apparel|Electronics) category\\?$",
+    "question_regex": "^What are the top 3 products by sales amount in the (?P<category>Apparel|Electronics|Grocery|Home) category\\?$",
     "sql_template": "SELECT\n  product,\n  SUM(amount) AS total_sales_amount\nFROM \"default\".\"main\".\"orders\"\nWHERE category = '{category}'\nGROUP BY product\nORDER BY total_sales_amount DESC\nLIMIT 3;"
+  },
+  "avg_order_value": {
+    "question_regex": "^What is the average order amount for the (?P<region>East|Midwest|Northeast|South|West) region\\?$",
+    "sql_template": "SELECT AVG(amount) AS average_order_amount\nFROM \"default\".\"main\".\"orders\"\nWHERE region = '{region}';"
+  },
+  "channel_count": {
+    "question_regex": "^How many orders are there per channel for the (?P<category>Apparel|Electronics|Grocery|Home) category\\?$",
+    "sql_template": "SELECT\n  channel,\n  COUNT(*) AS order_count\nFROM \"default\".\"main\".\"orders\"\nWHERE category = '{category}'\nGROUP BY channel\nORDER BY channel;"
   }
 }

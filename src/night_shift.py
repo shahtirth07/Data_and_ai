@@ -15,9 +15,15 @@ def _project_root():
     return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
-def _group_examples_by_type(day_events_df):
+def _group_answer_examples_by_type(day_events_df):
     grouped = {}
     for _, row in day_events_df.iterrows():
+        event_type = row["event_type"]
+        if event_type is None:
+            continue
+        if str(event_type) != "answer":
+            continue
+
         question_type = row["question_type"]
         question = row["question"]
         sql = row["sql"]
@@ -42,6 +48,48 @@ def _group_examples_by_type(day_events_df):
         grouped[question_type].append(example)
 
     return grouped
+
+
+def _count_answer_events_by_type(day_events_df):
+    counts = {}
+    for _, row in day_events_df.iterrows():
+        event_type = row["event_type"]
+        if event_type is None:
+            continue
+        event_type_text = str(event_type)
+        if event_type_text != "answer":
+            continue
+
+        question_type = row["question_type"]
+        if question_type is None:
+            continue
+        question_type_text = str(question_type)
+        if question_type_text == "" or question_type_text == "nan":
+            continue
+
+        if question_type_text not in counts:
+            counts[question_type_text] = 0
+        counts[question_type_text] = counts[question_type_text] + 1
+
+    return counts
+
+
+def _all_question_types(day_events_df):
+    types = {}
+    for _, row in day_events_df.iterrows():
+        question_type = row["question_type"]
+        if question_type is None:
+            continue
+        question_type_text = str(question_type)
+        if question_type_text == "" or question_type_text == "nan":
+            continue
+        types[question_type_text] = True
+
+    result = []
+    for question_type in types:
+        result.append(question_type)
+    result = sorted(result)
+    return result
 
 
 def _load_skills(path):
@@ -81,11 +129,20 @@ async def run_night_shift(day_session_id, session_id, max_parallel):
     day_events_df = query_telemetry(hot_con, day_sql)
     print("Loaded", len(day_events_df), "successful day events")
 
-    grouped = _group_examples_by_type(day_events_df)
+    answer_counts = _count_answer_events_by_type(day_events_df)
+    all_types = _all_question_types(day_events_df)
+    grouped = _group_answer_examples_by_type(day_events_df)
 
     question_types = []
-    for question_type in grouped:
-        question_types.append(question_type)
+    for question_type in all_types:
+        answer_count = 0
+        if question_type in answer_counts:
+            answer_count = answer_counts[question_type]
+
+        if answer_count >= 2:
+            question_types.append(question_type)
+        else:
+            print("already mastered:", question_type)
 
     question_types = sorted(question_types)
     print("Dreamer types:", question_types)
