@@ -274,6 +274,7 @@ async def run_day_shift(session_id, questions, use_skills, day_number, run_label
     total_tokens = 0
     reflex_count = 0
     llm_count = 0
+    playbook_used_count = 0
     reflex_seconds = 0.0
     llm_seconds = 0.0
     run_start = time.time()
@@ -333,6 +334,9 @@ async def run_day_shift(session_id, questions, use_skills, day_number, run_label
                 lessons_for_prompt = playbook_lessons
             if len(lessons_for_prompt) > 0:
                 playbook_used = True
+                playbook_used_count = playbook_used_count + 1
+            if use_playbook:
+                print("playbook lessons used=", len(lessons_for_prompt))
             prompt = _build_sql_prompt(df, question_text, lessons_for_prompt)
             llm_result = await ask_llm(rr_client, rr_token, prompt)
             llm_tokens = llm_tokens + llm_result["tokens"]
@@ -456,6 +460,7 @@ async def run_day_shift(session_id, questions, use_skills, day_number, run_label
     print("correct answers=", correct_count, "/", len(questions))
     print("reflex answers=", reflex_count)
     print("LLM answers=", llm_count)
+    print("questions that used playbook=", playbook_used_count)
     print("total tokens=", total_tokens)
     print("total seconds=", round(total_seconds, 2))
     print("avg seconds per reflex question=", round(reflex_avg, 2))

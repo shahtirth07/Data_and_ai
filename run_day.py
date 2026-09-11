@@ -10,7 +10,7 @@ questions_name = "day1"
 skills_flag = "off"
 day_number = 1
 run_label = ""
-playbook_flag = "on"
+playbook_flag = "off"
 
 args = sys.argv[1:]
 i = 0
