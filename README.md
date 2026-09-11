@@ -39,7 +39,7 @@ A recipe is only saved if it reproduces the day's answers on the dreamer's own i
 - `src/day_shift.py` — day worker: LLM or recipe, SQL, scoring, telemetry
 - `src/dreamer.py` — one night agent that builds and verifies a recipe
 - `src/hotdata_client.py` — Hotdata connect, create DB, run SQL, destroy DB
-- `src/insights.py` — six dashboard SQL insights
+- `src/insights.py` — dashboard SQL insights
 - `src/llm.py` — RocketRide or OpenAI LLM calls
 - `src/night_shift.py` — parallel dreamers and skills merge
 - `src/rocketride_client.py` — RocketRide connect, pipeline start/stop, ask
@@ -61,6 +61,7 @@ Insights:
 - Parallel vs sequential — night wall-clock time vs sum of dreamer latencies
 - Failure patterns — failed and retry counts with the most common error text
 - Night learning curve — dreamers run vs passed per night session
+- Repeat counts — LLM answer totals per type, recipe presence, and tokens spent before the first recipe
 
 ## What the telemetry changed
 
@@ -79,7 +80,7 @@ python data/make_data.py
 
 ### `.env` variables
 
-`HOTDATA_API_KEY`, `HOTDATA_WORKSPACE_ID`, `ROCKETRIDE_API_KEY`, `ROCKETRIDE_URI`, `TELEMETRY_DB_ID`, `USE_ROCKETRIDE`
+`HOTDATA_API_KEY`, `HOTDATA_WORKSPACE_ID`, `ROCKETRIDE_API_KEY`, `ROCKETRIDE_URI`, `TELEMETRY_DB_ID`, `USE_ROCKETRIDE`, `MIN_REPEATS`
 
 If `TELEMETRY_DB_ID` is empty, the first day run creates a telemetry database and prints the id to paste into `.env`.
 
