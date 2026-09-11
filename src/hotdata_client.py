@@ -7,11 +7,12 @@ from dotenv import load_dotenv
 _con = None
 
 
-def connect():
-    global _con
+def _project_root():
+    return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    env_path = os.path.join(project_root, ".env")
+
+def make_connection():
+    env_path = os.path.join(_project_root(), ".env")
     load_dotenv(env_path)
 
     api_key = os.getenv("HOTDATA_API_KEY")
@@ -22,13 +23,23 @@ def connect():
         token=api_key,
         workspace_id=workspace_id,
     )
+    return con
+
+
+def connect():
+    global _con
+    con = make_connection()
     _con = con
     return con
 
 
-def create_task_db(name, df):
-    database_id = _con.create_database(name, tables=["orders"])
-    _con.create_table(
+def create_task_db(name, df, con=None):
+    client = _con
+    if con is not None:
+        client = con
+
+    database_id = client.create_database(name, tables=["orders"])
+    client.create_table(
         "orders",
         df,
         database=(database_id, "main"),

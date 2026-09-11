@@ -32,11 +32,20 @@ async def connect():
     return client
 
 
-async def start_pipeline(client):
+async def start_pipeline(client, token=None, ttl=None):
     pipeline_path = os.path.join(_project_root(), "pipelines", "sql_writer.pipe")
-    result = await client.use(filepath=pipeline_path)
-    token = result["token"]
-    return token
+    if token is None:
+        if ttl is None:
+            result = await client.use(filepath=pipeline_path)
+        else:
+            result = await client.use(filepath=pipeline_path, ttl=ttl)
+    else:
+        if ttl is None:
+            result = await client.use(token=token, filepath=pipeline_path)
+        else:
+            result = await client.use(token=token, filepath=pipeline_path, ttl=ttl)
+    pipeline_token = result["token"]
+    return pipeline_token
 
 
 async def ask_llm(client, token, prompt):

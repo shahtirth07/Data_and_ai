@@ -45,12 +45,49 @@ def _column_description(df):
     return text
 
 
+def _join_values(values):
+    text = ""
+    i = 0
+    for value in values:
+        value_text = str(value)
+        if i == 0:
+            text = value_text
+        else:
+            text = text + ", " + value_text
+        i = i + 1
+    return text
+
+
+def _distinct_text_values(df):
+    text_columns = ["region", "category", "product", "channel"]
+    lines = []
+    for col_name in text_columns:
+        unique_values = sorted(df[col_name].dropna().unique())
+        values_text = _join_values(unique_values)
+        line = col_name + ": " + values_text
+        lines.append(line)
+
+    text = ""
+    i = 0
+    for line in lines:
+        if i == 0:
+            text = line
+        else:
+            text = text + "\n" + line
+        i = i + 1
+    return text
+
+
 def _build_sql_prompt(df, question_text):
     columns = _column_description(df)
+    distinct_values = _distinct_text_values(df)
     prompt = (
         "You write SQL for a Hotdata table.\n"
         'The table is "default"."main"."orders".\n'
         "Columns and types: " + columns + ".\n"
+        "Allowed text values (use these exact values with exact capitalization):\n"
+        + distinct_values
+        + "\n"
         "Question: " + question_text + "\n"
         "Reply with ONLY one SQL query.\n"
         "No explanation.\n"
@@ -152,6 +189,7 @@ async def run_day_shift(session_id):
         error_text = ""
         sql_text = ""
         result_df = None
+        rows_returned = 0
 
         prompt = _build_sql_prompt(df, question_text)
         llm_result = await ask_llm(rr_client, rr_token, prompt)
@@ -191,9 +229,11 @@ async def run_day_shift(session_id):
 
         if success:
             success_count = success_count + 1
+            rows_returned = len(result_df)
             print("First 3 rows:")
             print(result_df.head(3))
         else:
+            rows_returned = 0
             print("No result rows")
 
         latency_ms = int((time.time() - question_start) * 1000)
@@ -215,6 +255,8 @@ async def run_day_shift(session_id):
             "hotdata_queries": hotdata_queries,
             "success": success,
             "error": error_text,
+            "sql": sql_text,
+            "rows_returned": rows_returned,
             "created_at": created_at,
         }
         events.append(event)
