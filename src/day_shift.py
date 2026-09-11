@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 
 import pandas as pd
 
+from src.answer_key import get_true_numbers
 from src.hotdata_client import connect as hotdata_connect
 from src.hotdata_client import create_task_db, destroy_db, run_sql
 from src.llm import ask_llm
@@ -158,7 +159,60 @@ def _strip_sql_fences(text):
     return cleaned
 
 
-async def run_day_shift(session_id, questions, use_skills, day_number):
+def _collect_numbers_from_df(result_df):
+    numbers = []
+    if result_df is None:
+        return numbers
+
+    for col_name in result_df.columns:
+        series = result_df[col_name]
+        for value in series:
+            if value is None:
+                continue
+            try:
+                number = float(value)
+            except Exception:
+                continue
+            rounded = round(number, 2)
+            numbers.append(rounded)
+
+    numbers = sorted(numbers)
+    return numbers
+
+
+def _numbers_to_text(numbers):
+    if len(numbers) == 0:
+        return ""
+    text = ""
+    i = 0
+    for number in numbers:
+        piece = str(number)
+        if i == 0:
+            text = piece
+        else:
+            text = text + "," + piece
+        i = i + 1
+    return text
+
+
+def _is_correct(true_numbers, result_numbers):
+    if len(true_numbers) == 0:
+        if len(result_numbers) == 0:
+            return True
+        return False
+
+    for number in true_numbers:
+        found = False
+        for result_number in result_numbers:
+            if result_number == number:
+                found = True
+        if not found:
+            return False
+
+    return True
+
+
+async def run_day_shift(session_id, questions, use_skills, day_number, run_label):
     from dotenv import load_dotenv
 
     env_path = os.path.join(_project_root(), ".env")
@@ -195,6 +249,7 @@ async def run_day_shift(session_id, questions, use_skills, day_number):
 
     events = []
     success_count = 0
+    correct_count = 0
     total_tokens = 0
     reflex_count = 0
     llm_count = 0
@@ -305,7 +360,17 @@ async def run_day_shift(session_id, questions, use_skills, day_number):
             print(result_df.head(3))
         else:
             rows_returned = 0
+            result_df = None
             print("No result rows")
+
+        result_numbers_list = _collect_numbers_from_df(result_df)
+        true_numbers_list = get_true_numbers(question_type, question_text, df)
+        result_numbers = _numbers_to_text(result_numbers_list)
+        true_numbers = _numbers_to_text(true_numbers_list)
+        correct = _is_correct(true_numbers_list, result_numbers_list)
+        if correct:
+            correct_count = correct_count + 1
+        print("correct=", correct)
 
         created_at = datetime.now(timezone.utc).isoformat()
         event = {
@@ -326,6 +391,10 @@ async def run_day_shift(session_id, questions, use_skills, day_number):
             "sql": sql_text,
             "rows_returned": rows_returned,
             "day_number": day_number,
+            "run_label": run_label,
+            "result_numbers": result_numbers,
+            "true_numbers": true_numbers,
+            "correct": correct,
             "created_at": created_at,
         }
         events.append(event)
@@ -356,6 +425,7 @@ async def run_day_shift(session_id, questions, use_skills, day_number):
     print("Summary")
     print("questions answered=", len(events))
     print("successes=", success_count)
+    print("correct answers=", correct_count, "/", len(questions))
     print("reflex answers=", reflex_count)
     print("LLM answers=", llm_count)
     print("total tokens=", total_tokens)

@@ -4,7 +4,7 @@
     "sql_template": "SELECT\n  channel,\n  SUM(amount) AS total_sales_amount\nFROM \"default\".\"main\".\"orders\"\nWHERE region = '{region}'\nGROUP BY channel\nORDER BY channel;"
   },
   "quarter_growth": {
-    "question_regex": "^How do Q3 \\(Jul-Sep\\) vs Q4 \\(Oct-Dec\\) sales compare for the (?P<category>Apparel|Electronics|Grocery|Home) category\\?$",
+    "question_regex": "^How do Q3 \\(Jul\\-Sep\\) vs Q4 \\(Oct\\-Dec\\) sales compare for the (?P<category>Apparel|Electronics|Grocery|Home) category\\?$",
     "sql_template": "SELECT\n  SUM(CASE WHEN CAST(SUBSTR(order_date, 6, 2) AS INTEGER) BETWEEN 7 AND 9 THEN amount ELSE 0 END) AS q3_sales,\n  SUM(CASE WHEN CAST(SUBSTR(order_date, 6, 2) AS INTEGER) BETWEEN 10 AND 12 THEN amount ELSE 0 END) AS q4_sales,\n  SUM(CASE WHEN CAST(SUBSTR(order_date, 6, 2) AS INTEGER) BETWEEN 10 AND 12 THEN amount ELSE 0 END)\n  - SUM(CASE WHEN CAST(SUBSTR(order_date, 6, 2) AS INTEGER) BETWEEN 7 AND 9 THEN amount ELSE 0 END) AS q4_minus_q3,\n  CASE\n    WHEN SUM(CASE WHEN CAST(SUBSTR(order_date, 6, 2) AS INTEGER) BETWEEN 7 AND 9 THEN amount ELSE 0 END) = 0 THEN NULL\n    ELSE\n      SUM(CASE WHEN CAST(SUBSTR(order_date, 6, 2) AS INTEGER) BETWEEN 10 AND 12 THEN amount ELSE 0 END)\n      / SUM(CASE WHEN CAST(SUBSTR(order_date, 6, 2) AS INTEGER) BETWEEN 7 AND 9 THEN amount ELSE 0 END)\n  END AS q4_to_q3_ratio\nFROM \"default\".\"main\".\"orders\"\nWHERE category = '{category}'\n  AND CAST(SUBSTR(order_date, 6, 2) AS INTEGER) BETWEEN 7 AND 12;"
   },
   "region_total": {

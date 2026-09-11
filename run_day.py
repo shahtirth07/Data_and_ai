@@ -8,6 +8,8 @@ from src.day_shift import run_day_shift
 
 questions_name = "day1"
 skills_flag = "off"
+day_number = 1
+run_label = ""
 
 args = sys.argv[1:]
 i = 0
@@ -22,6 +24,16 @@ while i < len(args):
             i = i + 1
             if i < len(args):
                 skills_flag = args[i]
+        else:
+            if arg == "--day":
+                i = i + 1
+                if i < len(args):
+                    day_number = int(args[i])
+            else:
+                if arg == "--label":
+                    i = i + 1
+                    if i < len(args):
+                        run_label = args[i]
     i = i + 1
 
 questions_name = questions_name.strip().lower()
@@ -29,10 +41,9 @@ skills_flag = skills_flag.strip().lower()
 
 if questions_name == "day2":
     questions = QUESTIONS_DAY2
-    day_number = 2
+    questions_name = "day2"
 else:
     questions = QUESTIONS
-    day_number = 1
     questions_name = "day1"
 
 use_skills = False
@@ -52,5 +63,8 @@ print("session_id=", session_id)
 print("questions=", questions_name)
 print("skills=", skills_flag)
 print("day_number=", day_number)
+print("label=", run_label)
 
-asyncio.run(run_day_shift(session_id, questions, use_skills, day_number))
+asyncio.run(
+    run_day_shift(session_id, questions, use_skills, day_number, run_label)
+)
