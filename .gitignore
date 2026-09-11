@@ -1,3 +1,5 @@
 .venv/
 .env
 __pycache__/
+.rocketride/
+pipelines/sql_writer.pipe
