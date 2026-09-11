@@ -25,7 +25,7 @@
   },
   "avg_order_value": {
     "question_regex": "^What is the average order amount for the (?P<region>East|Midwest|Northeast|South|West) region\\?$",
-    "sql_template": "SELECT AVG(amount) AS average_order_amount\nFROM \"default\".\"main\".\"orders\"\nWHERE region = '{region}';"
+    "sql_template": "SELECT AVG(amount) AS avg_order_amount\nFROM \"default\".\"main\".\"orders\"\nWHERE region = '{region}';"
   },
   "channel_count": {
     "question_regex": "^How many orders are there per channel for the (?P<category>Apparel|Electronics|Grocery|Home) category\\?$",

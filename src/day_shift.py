@@ -9,6 +9,7 @@ from src.answer_key import get_true_numbers
 from src.hotdata_client import connect as hotdata_connect
 from src.hotdata_client import create_task_db, destroy_db, run_sql
 from src.llm import ask_llm
+from src.playbook import load_playbook, lessons_text
 from src.rocketride_client import connect as rocketride_connect
 from src.rocketride_client import start_pipeline, stop_pipeline
 from src.skills import match_skill
@@ -101,7 +102,7 @@ def _load_skills():
     return {}
 
 
-def _build_sql_prompt(df, question_text):
+def _build_sql_prompt(df, question_text, playbook_lessons):
     columns = _column_description(df)
     distinct_values = _distinct_text_values(df)
     prompt = (
@@ -111,10 +112,23 @@ def _build_sql_prompt(df, question_text):
         "Allowed text values (use these exact values with exact capitalization):\n"
         + distinct_values
         + "\n"
-        "Question: " + question_text + "\n"
-        "Reply with ONLY one SQL query.\n"
-        "No explanation.\n"
-        "No markdown fences."
+    )
+    lessons_block = lessons_text(playbook_lessons)
+    if lessons_block != "":
+        prompt = (
+            prompt
+            + "Lessons learned from past runs\n"
+            + lessons_block
+            + "\n"
+        )
+    prompt = (
+        prompt
+        + "Question: "
+        + question_text
+        + "\n"
+        + "Reply with ONLY one SQL query.\n"
+        + "No explanation.\n"
+        + "No markdown fences."
     )
     return prompt
 
@@ -212,7 +226,7 @@ def _is_correct(true_numbers, result_numbers):
     return True
 
 
-async def run_day_shift(session_id, questions, use_skills, day_number, run_label):
+async def run_day_shift(session_id, questions, use_skills, day_number, run_label, use_playbook):
     from dotenv import load_dotenv
 
     env_path = os.path.join(_project_root(), ".env")
@@ -238,6 +252,13 @@ async def run_day_shift(session_id, questions, use_skills, day_number, run_label
         skills = _load_skills()
         print("Loaded", len(skills), "skills from skills.json")
 
+    playbook_lessons = []
+    if use_playbook:
+        playbook_lessons = load_playbook()
+        print("Loaded", len(playbook_lessons), "playbook lessons")
+    else:
+        print("Playbook disabled for this run")
+
     use_rr = _use_rocketride()
     rr_client = None
     rr_token = None
@@ -253,6 +274,7 @@ async def run_day_shift(session_id, questions, use_skills, day_number, run_label
     total_tokens = 0
     reflex_count = 0
     llm_count = 0
+    playbook_used_count = 0
     reflex_seconds = 0.0
     llm_seconds = 0.0
     run_start = time.time()
@@ -279,6 +301,7 @@ async def run_day_shift(session_id, questions, use_skills, day_number, run_label
         rows_returned = 0
         used_skill = False
         event_type = "answer"
+        playbook_used = False
 
         skill_hit = None
         if use_skills:
@@ -306,7 +329,15 @@ async def run_day_shift(session_id, questions, use_skills, day_number, run_label
         else:
             used_skill = False
             event_type = "answer"
-            prompt = _build_sql_prompt(df, question_text)
+            lessons_for_prompt = []
+            if use_playbook:
+                lessons_for_prompt = playbook_lessons
+            if len(lessons_for_prompt) > 0:
+                playbook_used = True
+                playbook_used_count = playbook_used_count + 1
+            if use_playbook:
+                print("playbook lessons used=", len(lessons_for_prompt))
+            prompt = _build_sql_prompt(df, question_text, lessons_for_prompt)
             llm_result = await ask_llm(rr_client, rr_token, prompt)
             llm_tokens = llm_tokens + llm_result["tokens"]
             tokens_estimated = llm_result["tokens_estimated"]
@@ -395,6 +426,7 @@ async def run_day_shift(session_id, questions, use_skills, day_number, run_label
             "result_numbers": result_numbers,
             "true_numbers": true_numbers,
             "correct": correct,
+            "playbook_used": playbook_used,
             "created_at": created_at,
         }
         events.append(event)
@@ -428,6 +460,7 @@ async def run_day_shift(session_id, questions, use_skills, day_number, run_label
     print("correct answers=", correct_count, "/", len(questions))
     print("reflex answers=", reflex_count)
     print("LLM answers=", llm_count)
+    print("questions that used playbook=", playbook_used_count)
     print("total tokens=", total_tokens)
     print("total seconds=", round(total_seconds, 2))
     print("avg seconds per reflex question=", round(reflex_avg, 2))

@@ -9,6 +9,10 @@ from dotenv import load_dotenv
 
 from src.dreamer import run_dreamer
 from src.hotdata_client import connect as hotdata_connect
+from src.llm import ask_llm
+from src.playbook import load_playbook, lessons_text, save_playbook
+from src.rocketride_client import connect as rocketride_connect
+from src.rocketride_client import start_pipeline, stop_pipeline
 from src.telemetry import get_telemetry_db, log_events, query_telemetry
 
 
@@ -134,6 +138,314 @@ def _save_skills(path, skills):
     with open(path, "w", encoding="utf-8") as f:
         json.dump(skills, f, indent=2)
         f.write("\n")
+
+
+def _use_rocketride():
+    flag = os.getenv("USE_ROCKETRIDE")
+    if flag is None:
+        flag = ""
+    flag = flag.strip().lower()
+    if flag == "true":
+        return True
+    return False
+
+
+def _strip_json_fences(text):
+    cleaned = text.strip()
+    if cleaned.startswith("```"):
+        lines = cleaned.split("\n")
+        kept = []
+        line_index = 0
+        for line in lines:
+            if line_index == 0:
+                line_index = line_index + 1
+                continue
+            kept.append(line)
+            line_index = line_index + 1
+        if len(kept) > 0:
+            last_line = kept[len(kept) - 1].strip()
+            if last_line.startswith("```"):
+                kept.pop()
+        cleaned = "\n".join(kept)
+        cleaned = cleaned.strip()
+    return cleaned
+
+
+def _parse_lessons_json(text):
+    cleaned = _strip_json_fences(text)
+    data = json.loads(cleaned)
+    if not isinstance(data, list):
+        return []
+    lessons = []
+    for item in data:
+        lesson = str(item).strip()
+        if lesson == "":
+            continue
+        lessons.append(lesson)
+        if len(lessons) >= 8:
+            break
+    return lessons
+
+
+def _merge_lessons(existing, new_lessons):
+    merged = []
+    seen = {}
+    for lesson in existing:
+        text = str(lesson).strip()
+        if text == "":
+            continue
+        key = text.lower()
+        if key in seen:
+            continue
+        seen[key] = True
+        merged.append(text)
+        if len(merged) >= 8:
+            return merged
+    for lesson in new_lessons:
+        text = str(lesson).strip()
+        if text == "":
+            continue
+        key = text.lower()
+        if key in seen:
+            continue
+        seen[key] = True
+        merged.append(text)
+        if len(merged) >= 8:
+            break
+    return merged
+
+
+def _gather_playbook_context(hot_con):
+    failed_sql = (
+        'SELECT question_type, question, error, sql, created_at '
+        'FROM "default"."main"."events" '
+        "WHERE session_id <> 'test' "
+        "AND session_id <> 'setup' "
+        "AND success = false "
+        "AND error IS NOT NULL "
+        "AND CAST(error AS VARCHAR) <> '' "
+        "ORDER BY created_at DESC"
+    )
+    retry_sql = (
+        'SELECT question_type, question, error, sql, hotdata_queries, created_at '
+        'FROM "default"."main"."events" '
+        "WHERE session_id <> 'test' "
+        "AND session_id <> 'setup' "
+        "AND hotdata_queries > 1 "
+        "ORDER BY created_at DESC"
+    )
+    distinct_sql = (
+        'SELECT question_type, sql, COUNT(*) AS times_seen '
+        'FROM "default"."main"."events" '
+        "WHERE session_id <> 'test' "
+        "AND session_id <> 'setup' "
+        "AND event_type IN ('answer', 'reflex') "
+        "AND sql IS NOT NULL "
+        "AND CAST(sql AS VARCHAR) <> '' "
+        "AND question_type IS NOT NULL "
+        "AND CAST(question_type AS VARCHAR) <> '' "
+        "GROUP BY question_type, sql "
+        "ORDER BY question_type, times_seen DESC"
+    )
+
+    failed_df = query_telemetry(hot_con, failed_sql)
+    retry_df = query_telemetry(hot_con, retry_sql)
+    distinct_df = query_telemetry(hot_con, distinct_sql)
+
+    lines = []
+    lines.append("Failed events with error text:")
+    failed_count = 0
+    if failed_df is not None:
+        for _, row in failed_df.iterrows():
+            if failed_count >= 40:
+                break
+            qtype = str(row["question_type"])
+            error = str(row["error"])
+            sql = ""
+            if row["sql"] is not None:
+                sql = str(row["sql"])
+            lines.append(
+                "- type="
+                + qtype
+                + " error="
+                + error
+                + " sql="
+                + sql
+            )
+            failed_count = failed_count + 1
+    if failed_count == 0:
+        lines.append("- none")
+
+    lines.append("")
+    lines.append("Events that needed a retry (hotdata_queries > 1):")
+    retry_count = 0
+    if retry_df is not None:
+        for _, row in retry_df.iterrows():
+            if retry_count >= 40:
+                break
+            qtype = str(row["question_type"])
+            error = ""
+            if row["error"] is not None:
+                error = str(row["error"])
+            sql = ""
+            if row["sql"] is not None:
+                sql = str(row["sql"])
+            queries = str(row["hotdata_queries"])
+            lines.append(
+                "- type="
+                + qtype
+                + " queries="
+                + queries
+                + " error="
+                + error
+                + " sql="
+                + sql
+            )
+            retry_count = retry_count + 1
+    if retry_count == 0:
+        lines.append("- none")
+
+    lines.append("")
+    lines.append("Distinct SQL written per question_type:")
+    distinct_count = 0
+    if distinct_df is not None:
+        for _, row in distinct_df.iterrows():
+            if distinct_count >= 80:
+                break
+            qtype = str(row["question_type"])
+            sql = str(row["sql"])
+            times = str(row["times_seen"])
+            lines.append(
+                "- type="
+                + qtype
+                + " times="
+                + times
+                + " sql="
+                + sql
+            )
+            distinct_count = distinct_count + 1
+    if distinct_count == 0:
+        lines.append("- none")
+
+    text = ""
+    line_index = 0
+    for line in lines:
+        if line_index == 0:
+            text = line
+        else:
+            text = text + "\n" + line
+        line_index = line_index + 1
+    return text
+
+
+def _build_playbook_prompt(context_text, existing_lessons):
+    existing_text = lessons_text(existing_lessons)
+    if existing_text == "":
+        existing_block = "None yet."
+    else:
+        existing_block = existing_text
+
+    prompt = (
+        "You write short lessons that help an agent write correct Hotdata SQL "
+        "for an orders table on the first try.\n"
+        "Use the telemetry below.\n"
+        "Return ONLY a JSON list of strings.\n"
+        "At most 8 lessons.\n"
+        "Each lesson must be one sentence and specific, for example about exact "
+        "column values or SQL types this engine rejects.\n"
+        "No markdown fences.\n"
+        "No explanation.\n"
+        "\n"
+        "Existing lessons:\n"
+        + existing_block
+        + "\n\n"
+        "Telemetry:\n"
+        + context_text
+    )
+    return prompt
+
+
+async def _update_playbook(hot_con, session_id):
+    playbook_start = time.time()
+    existing = load_playbook()
+    context_text = _gather_playbook_context(hot_con)
+    prompt = _build_playbook_prompt(context_text, existing)
+
+    llm_tokens = 0
+    tokens_estimated = False
+    success = False
+    error_text = ""
+    new_lessons = []
+    merged = existing
+
+    rr_client = None
+    rr_token = None
+    use_rr = _use_rocketride()
+
+    try:
+        if use_rr:
+            rr_client = await rocketride_connect()
+            rr_token = await start_pipeline(
+                rr_client, token="tk_playbook_" + session_id, ttl=300
+            )
+            print("Started playbook RocketRide pipeline token=", rr_token)
+
+        llm_result = await ask_llm(rr_client, rr_token, prompt)
+        llm_tokens = llm_result["tokens"]
+        tokens_estimated = llm_result["tokens_estimated"]
+        new_lessons = _parse_lessons_json(llm_result["text"])
+        merged = _merge_lessons(existing, new_lessons)
+        save_playbook(merged)
+        success = True
+    except Exception as err:
+        error_text = str(err)
+        success = False
+        print("Playbook update failed:", error_text)
+    finally:
+        if use_rr:
+            if rr_token is not None:
+                try:
+                    await stop_pipeline(rr_client, rr_token)
+                    print("Stopped playbook RocketRide pipeline")
+                except Exception as stop_err:
+                    print("Playbook stop_pipeline failed:", stop_err)
+            if rr_client is not None:
+                try:
+                    await rr_client.disconnect()
+                except Exception as disconnect_err:
+                    print("Playbook disconnect failed:", disconnect_err)
+
+    latency_ms = int((time.time() - playbook_start) * 1000)
+    lessons_count = len(merged)
+
+    print("")
+    print("Playbook lessons:")
+    if lessons_count == 0:
+        print("(none)")
+    else:
+        print(lessons_text(merged))
+
+    event = {
+        "event_id": session_id + "-playbook",
+        "session_id": session_id,
+        "run_type": "night",
+        "agent_id": "playbook",
+        "event_type": "playbook",
+        "question_type": "",
+        "question": "",
+        "used_skill": False,
+        "llm_tokens": llm_tokens,
+        "tokens_estimated": tokens_estimated,
+        "latency_ms": latency_ms,
+        "hotdata_queries": 0,
+        "success": success,
+        "error": error_text,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "db_create_ms": 0,
+        "db_destroy_ms": 0,
+        "lessons_count": lessons_count,
+    }
+    return event
 
 
 async def run_night_shift(day_session_id, session_id, max_parallel):
@@ -265,6 +577,9 @@ async def run_night_shift(day_session_id, session_id, max_parallel):
     _save_skills(skills_path, existing_skills)
     print("Saved skills to", skills_path)
     print("Updated skill types:", list(passed_skills.keys()))
+
+    playbook_event = await _update_playbook(hot_con, session_id)
+    all_events.append(playbook_event)
 
     wall_clock_ms = int((time.time() - run_start) * 1000)
     created_at = datetime.now(timezone.utc).isoformat()
