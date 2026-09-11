@@ -5,6 +5,7 @@ import time
 from datetime import datetime, timezone
 
 import pandas as pd
+from dotenv import load_dotenv
 
 from src.dreamer import run_dreamer
 from src.hotdata_client import connect as hotdata_connect
@@ -15,6 +16,24 @@ def _project_root():
     return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
+def _min_repeats():
+    env_path = os.path.join(_project_root(), ".env")
+    load_dotenv(env_path)
+    raw = os.getenv("MIN_REPEATS")
+    if raw is None:
+        return 2
+    raw = raw.strip()
+    if raw == "":
+        return 2
+    try:
+        value = int(raw)
+    except Exception:
+        return 2
+    if value < 1:
+        return 2
+    return value
+
+
 def _group_answer_examples_by_type(day_events_df):
     grouped = {}
     for _, row in day_events_df.iterrows():
@@ -23,6 +42,11 @@ def _group_answer_examples_by_type(day_events_df):
             continue
         if str(event_type) != "answer":
             continue
+
+        success = row["success"]
+        if success is not True:
+            if str(success).strip().lower() != "true":
+                continue
 
         question_type = row["question_type"]
         question = row["question"]
@@ -59,6 +83,11 @@ def _count_answer_events_by_type(day_events_df):
         event_type_text = str(event_type)
         if event_type_text != "answer":
             continue
+
+        success = row["success"]
+        if success is not True:
+            if str(success).strip().lower() != "true":
+                continue
 
         question_type = row["question_type"]
         if question_type is None:
@@ -109,6 +138,8 @@ def _save_skills(path, skills):
 
 async def run_night_shift(day_session_id, session_id, max_parallel):
     run_start = time.time()
+    min_repeats = _min_repeats()
+    print("MIN_REPEATS=", min_repeats)
 
     csv_path = os.path.join(_project_root(), "data", "orders.csv")
     df = pd.read_csv(csv_path)
@@ -118,16 +149,17 @@ async def run_night_shift(day_session_id, session_id, max_parallel):
     get_telemetry_db(hot_con)
     print("Connected to Hotdata telemetry")
 
-    day_sql = (
+    all_day_sql = (
         'SELECT * FROM "default"."main"."events" '
-        "WHERE session_id = '"
-        + day_session_id
-        + "' "
-        "AND run_type = 'day' "
-        "AND success = true"
+        "WHERE run_type = 'day' "
+        "AND event_type = 'answer' "
+        "AND success = true "
+        "AND session_id <> 'test' "
+        "AND session_id <> 'setup'"
     )
-    day_events_df = query_telemetry(hot_con, day_sql)
-    print("Loaded", len(day_events_df), "successful day events")
+    day_events_df = query_telemetry(hot_con, all_day_sql)
+    print("Loaded", len(day_events_df), "successful LLM answers across all day sessions")
+    print("Night triggered from day_session_id=", day_session_id)
 
     answer_counts = _count_answer_events_by_type(day_events_df)
     all_types = _all_question_types(day_events_df)
@@ -139,10 +171,20 @@ async def run_night_shift(day_session_id, session_id, max_parallel):
         if question_type in answer_counts:
             answer_count = answer_counts[question_type]
 
-        if answer_count >= 2:
+        met_threshold = False
+        if answer_count >= min_repeats:
+            met_threshold = True
+
+        print(
+            question_type,
+            "total=",
+            answer_count,
+            "met_threshold=",
+            met_threshold,
+        )
+
+        if met_threshold:
             question_types.append(question_type)
-        else:
-            print("already mastered:", question_type)
 
     question_types = sorted(question_types)
     print("Dreamer types:", question_types)

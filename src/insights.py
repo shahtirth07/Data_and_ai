@@ -165,4 +165,76 @@ INSIGHTS = [
         "chart_x": "session_id",
         "chart_y": "dreamers_passed",
     },
+    {
+        "title": "Repeat counts",
+        "meaning": "Per question type: total successful LLM answers across all day sessions, whether a recipe exists, and tokens spent on LLM answers before the first successful dream.",
+        "sql": (
+            'SELECT '
+            "a.question_type, "
+            "a.total_llm_answers, "
+            "CASE WHEN d.first_recipe_at IS NOT NULL THEN true ELSE false END AS has_recipe, "
+            "COALESCE(t.tokens_before_recipe, a.total_tokens) AS tokens_before_recipe "
+            "FROM ("
+            "  SELECT "
+            "    question_type, "
+            "    COUNT(*) AS total_llm_answers, "
+            "    SUM(llm_tokens) AS total_tokens "
+            '  FROM "default"."main"."events" '
+            "  WHERE run_type = 'day' "
+            "  AND event_type = 'answer' "
+            "  AND success = true "
+            "  AND session_id <> 'test' "
+            "  AND session_id <> 'setup' "
+            "  AND question_type IS NOT NULL "
+            "  AND CAST(question_type AS VARCHAR) <> '' "
+            "  GROUP BY question_type"
+            ") a "
+            "LEFT JOIN ("
+            "  SELECT "
+            "    question_type, "
+            "    MIN(created_at) AS first_recipe_at "
+            '  FROM "default"."main"."events" '
+            "  WHERE run_type = 'night' "
+            "  AND event_type = 'dream' "
+            "  AND success = true "
+            "  AND session_id <> 'test' "
+            "  AND question_type IS NOT NULL "
+            "  AND CAST(question_type AS VARCHAR) <> '' "
+            "  GROUP BY question_type"
+            ") d "
+            "ON a.question_type = d.question_type "
+            "LEFT JOIN ("
+            "  SELECT "
+            "    a2.question_type, "
+            "    SUM(a2.llm_tokens) AS tokens_before_recipe "
+            '  FROM "default"."main"."events" a2 '
+            "  INNER JOIN ("
+            "    SELECT "
+            "      question_type, "
+            "      MIN(created_at) AS first_recipe_at "
+            '    FROM "default"."main"."events" '
+            "    WHERE run_type = 'night' "
+            "    AND event_type = 'dream' "
+            "    AND success = true "
+            "    AND session_id <> 'test' "
+            "    AND question_type IS NOT NULL "
+            "    AND CAST(question_type AS VARCHAR) <> '' "
+            "    GROUP BY question_type"
+            "  ) d2 "
+            "  ON a2.question_type = d2.question_type "
+            "  WHERE a2.run_type = 'day' "
+            "  AND a2.event_type = 'answer' "
+            "  AND a2.success = true "
+            "  AND a2.session_id <> 'test' "
+            "  AND a2.session_id <> 'setup' "
+            "  AND a2.created_at < d2.first_recipe_at "
+            "  GROUP BY a2.question_type"
+            ") t "
+            "ON a.question_type = t.question_type "
+            "ORDER BY a.question_type"
+        ),
+        "chart": "bar",
+        "chart_x": "question_type",
+        "chart_y": "tokens_before_recipe",
+    },
 ]
